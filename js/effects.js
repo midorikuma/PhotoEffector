@@ -318,21 +318,42 @@ const PhotoEffects = (() => {
         const h = targetCanvas.height;
         const strength = amount / 100; // 0~1
 
-        // 1. ハイライト抽出用のオフスクリーンCanvasを作成
         const hlCanvas = document.createElement('canvas');
         hlCanvas.width = w;
         hlCanvas.height = h;
         const hlCtx = hlCanvas.getContext('2d');
 
-        // ベース画像を描画
-        hlCtx.drawImage(targetCanvas, 0, 0);
-
-        // 乗算(multiply)モードで自身を重ねることで、暗い部分はより暗く、明るい部分は残る（ハイライト抽出の近似計算）
-        // 強度(amount)に応じて重ねる回数を変えるか、opacityで調整する
-        hlCtx.globalCompositeOperation = 'multiply';
-        hlCtx.drawImage(targetCanvas, 0, 0);
-        // さらにもう一度乗算してハイライトを強調
-        hlCtx.drawImage(targetCanvas, 0, 0);
+        // 1. ピクセル操作によるハイライト抽出 (暗い部分を黒くすると、重ねた際に背景が暗くなる原因になるため完全に透明にする)
+        const imgData = targetCtx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+        const thresh = 60; // 抽出閾値
+        
+        for (let i = 0; i < data.length; i += 4) {
+            const a = data[i+3];
+            if (a === 0) continue;
+            
+            const r = data[i];
+            const g = data[i+1];
+            const b = data[i+2];
+            const luma = r * 0.299 + g * 0.587 + b * 0.114;
+            
+            if (luma > thresh) {
+                // 閾値を超えた分だけアルファを残し、やわらかく抽出する
+                const factor = (luma - thresh) / (255 - thresh);
+                // 光の芯を白っぽく明るくする
+                data[i] = Math.min(255, r + 50 * factor);
+                data[i+1] = Math.min(255, g + 50 * factor);
+                data[i+2] = Math.min(255, b + 50 * factor);
+                data[i+3] = a * factor; 
+            } else {
+                // 暗い部分は完全に透明にして影になるのを防ぐ
+                data[i] = 0;
+                data[i+1] = 0;
+                data[i+2] = 0;
+                data[i+3] = 0;
+            }
+        }
+        hlCtx.putImageData(imgData, 0, 0);
         
         // 2. ブラー用のキャンバスを作成し、抽出したハイライトをぼかす
         const blurCanvas = document.createElement('canvas');
@@ -346,8 +367,9 @@ const PhotoEffects = (() => {
         blurCtx.drawImage(hlCanvas, 0, 0);
         blurCtx.filter = 'none';
 
-        // 3. 元画像の上に、ぼかしたハイライトを「スクリーン(screen)」または「覆い焼きカラー(color-dodge)」で合成する
-        targetCtx.globalCompositeOperation = 'screen';
+        // 3. 元画像の上に、ぼかしたハイライトを加算(lighter)で合成する
+        // screenよりlighterの方が純粋な光の加算になり、背景の暗黒化を防げる
+        targetCtx.globalCompositeOperation = 'lighter';
         targetCtx.globalAlpha = strength * 1.5; // エフェクト強度
         targetCtx.drawImage(blurCanvas, 0, 0);
 
