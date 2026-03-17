@@ -130,6 +130,9 @@ const PhotoEffects = (() => {
         offCtx.putImageData(imageData, 0, 0);
 
         // --- Post-processing Effects ---
+        if (params.lightBlur > 0) {
+            _applyLightBlur(offCanvas, offCtx, params.lightBlur);
+        }
         if (params.pixelate > 1) {
             _applyPixelate(offCanvas, offCtx, params.pixelate);
         }
@@ -304,6 +307,53 @@ const PhotoEffects = (() => {
         tmpCtx.putImageData(edgeData, 0, 0);
 
         targetCtx.drawImage(tmpCanvas, 0, 0);
+    }
+
+    /**
+     * 光ブラー (HDR Bloom) エフェクト
+     * 画像のハイライト部分を抽出し、ぼかしてスクリーン合成する
+     */
+    function _applyLightBlur(targetCanvas, targetCtx, amount) {
+        const w = targetCanvas.width;
+        const h = targetCanvas.height;
+        const strength = amount / 100; // 0~1
+
+        // 1. ハイライト抽出用のオフスクリーンCanvasを作成
+        const hlCanvas = document.createElement('canvas');
+        hlCanvas.width = w;
+        hlCanvas.height = h;
+        const hlCtx = hlCanvas.getContext('2d');
+
+        // ベース画像を描画
+        hlCtx.drawImage(targetCanvas, 0, 0);
+
+        // 乗算(multiply)モードで自身を重ねることで、暗い部分はより暗く、明るい部分は残る（ハイライト抽出の近似計算）
+        // 強度(amount)に応じて重ねる回数を変えるか、opacityで調整する
+        hlCtx.globalCompositeOperation = 'multiply';
+        hlCtx.drawImage(targetCanvas, 0, 0);
+        // さらにもう一度乗算してハイライトを強調
+        hlCtx.drawImage(targetCanvas, 0, 0);
+        
+        // 2. ブラー用のキャンバスを作成し、抽出したハイライトをぼかす
+        const blurCanvas = document.createElement('canvas');
+        blurCanvas.width = w;
+        blurCanvas.height = h;
+        const blurCtx = blurCanvas.getContext('2d');
+        
+        // ぼかし量は固定値または画像サイズに対する比率
+        const blurRadius = Math.max(10, w * 0.05); 
+        blurCtx.filter = `blur(${blurRadius}px)`;
+        blurCtx.drawImage(hlCanvas, 0, 0);
+        blurCtx.filter = 'none';
+
+        // 3. 元画像の上に、ぼかしたハイライトを「スクリーン(screen)」または「覆い焼きカラー(color-dodge)」で合成する
+        targetCtx.globalCompositeOperation = 'screen';
+        targetCtx.globalAlpha = strength * 1.5; // エフェクト強度
+        targetCtx.drawImage(blurCanvas, 0, 0);
+
+        // 状態をリセット
+        targetCtx.globalCompositeOperation = 'source-over';
+        targetCtx.globalAlpha = 1.0;
     }
 
     /**

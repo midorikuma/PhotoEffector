@@ -16,7 +16,8 @@ const ParamsUI = (() => {
         { key: 'blur', label: 'ぼかし', icon: '💧', min: 0, max: 20, defaultVal: 0, step: 0.5, unit: 'px' },
         { key: 'sharpness', label: 'シャープネス', icon: '🔪', min: 0, max: 100, defaultVal: 0, step: 1, unit: '' },
         { key: 'vignette', label: 'ビネット', icon: '⭕', min: 0, max: 100, defaultVal: 0, step: 1, unit: '%' },
-        // --- イラスト・色数削減系 ---
+        // --- フィルター・イラスト系 ---
+        { key: 'lightBlur', label: '光ブラー', icon: '✨', min: 0, max: 100, defaultVal: 0, step: 1, unit: '%' },
         { key: 'posterize', label: 'ポスタリゼーション', icon: '🎭', min: 2, max: 32, defaultVal: 32, step: 1, unit: '色' },
         { key: 'illustration', label: 'イラスト風', icon: '✏️', min: 0, max: 100, defaultVal: 0, step: 1, unit: '' },
         { key: 'pixelate', label: 'ピクセル化', icon: '🟩', min: 1, max: 50, defaultVal: 1, step: 1, unit: 'px' },
@@ -182,14 +183,16 @@ const ParamsUI = (() => {
                 let val = parseFloat(newValues[param.key]);
                 if (!isNaN(val)) {
                     val = Math.max(param.min, Math.min(param.max, val)); // クランプ
-                    currentValues[param.key] = val;
-                    const el = sliderElements[param.key];
-                    if (el) {
-                        el.slider.value = val;
-                        el.valueDisplay.textContent = formatValue(val, param);
-                        updateSliderFill(el.slider, param);
+                    if (currentValues[param.key] !== val) {
+                        currentValues[param.key] = val;
+                        const el = sliderElements[param.key];
+                        if (el) {
+                            el.slider.value = val;
+                            el.valueDisplay.textContent = formatValue(val, param);
+                            updateSliderFill(el.slider, param);
+                        }
+                        changed = true;
                     }
-                    changed = true;
                 }
             }
         });
@@ -197,7 +200,7 @@ const ParamsUI = (() => {
         if (changed && onChange) {
             onChange({ ...currentValues });
         }
-        return changed;
+        return changed; // 変更があった場合のみ true を返す
     }
 
     return {

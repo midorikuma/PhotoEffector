@@ -195,13 +195,14 @@ const App = (() => {
      * パラメータをクリップボードにコピー
      */
     async function handleCopyParams() {
+        const values = ParamsUI.getValues();
+        const jsonStr = JSON.stringify(values);
         try {
-            const values = ParamsUI.getValues();
-            await navigator.clipboard.writeText(JSON.stringify(values));
+            await navigator.clipboard.writeText(jsonStr);
             alert('パラメータをコピーしました');
         } catch (err) {
-            console.error('Failed to copy params:', err);
-            alert('コピーに失敗しました');
+            console.warn('Clipboard write failed, using prompt fallback:', err);
+            prompt('以下のテキストをコピーしてください（Ctrl+C または Cmd+C）', jsonStr);
         }
     }
 
@@ -209,12 +210,20 @@ const App = (() => {
      * パラメータをクリップボードからペースト
      */
     async function handlePasteParams() {
+        let text = '';
         try {
-            const text = await navigator.clipboard.readText();
+            text = await navigator.clipboard.readText();
+        } catch (err) {
+            console.warn('Clipboard read failed, using prompt fallback:', err);
+            text = prompt('コピーしたパラメータのテキストを貼り付けてください');
+            if (!text) return; // キャンセルされた場合
+        }
+
+        try {
             const values = JSON.parse(text);
             const success = ParamsUI.setValues(values);
             if (!success) {
-                alert('無効なパラメータデータです');
+                alert('変更がないか、無効なパラメータデータです');
             }
         } catch (err) {
             console.error('Failed to paste params:', err);
