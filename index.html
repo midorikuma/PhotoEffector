@@ -81,6 +81,59 @@
 
             <!-- パラメータパネル -->
             <aside class="params-panel" id="params-panel">
+                <!-- レイヤーパネル -->
+                <div class="layer-panel">
+                    <div class="panel-header"
+                        style="display: flex; justify-content: space-between; align-items: center; padding: 10px 16px;">
+                        <h3>レイヤー</h3>
+                        <div class="header-right" style="gap: 5px;">
+                            <label for="add-layer-input" class="btn-icon" title="レイヤーを追加"
+                                style="width: 24px; height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                            </label>
+                            <input type="file" id="add-layer-input" accept="image/*" hidden>
+                        </div>
+                    </div>
+                    <div class="layer-list" id="layer-list">
+                        <!-- レイヤリアイテムは動的生成 -->
+                    </div>
+
+                    <!-- 選択中レイヤーのプロパティ -->
+                    <div class="layer-properties" id="layer-properties"
+                        style="display: none; padding: 10px 16px; border-bottom: 1px solid var(--border); background: #1a1a1a;">
+                        <div
+                            style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                            <label style="font-size: 0.75rem; color: var(--text-sub);">不透明度</label>
+                            <span id="opacity-val" style="font-size: 0.75rem; color: var(--accent);">100%</span>
+                        </div>
+                        <input type="range" id="opacity-slider" min="0" max="100" value="100"
+                            style="margin-bottom: 12px;">
+
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <label style="font-size: 0.75rem; color: var(--text-sub);">合成モード</label>
+                            <select id="blend-mode-select"
+                                style="padding: 4px; border-radius: 4px; background: var(--bg); border: 1px solid var(--border); color: var(--text); font-size: 0.75rem;">
+                                <option value="source-over">通常</option>
+                                <option value="multiply">乗算</option>
+                                <option value="screen">スクリーン</option>
+                                <option value="overlay">オーバーレイ</option>
+                                <option value="darken">比較（暗）</option>
+                                <option value="lighten">比較（明）</option>
+                                <option value="color-dodge">覆い焼きカラー</option>
+                                <option value="color-burn">焼き込みカラー</option>
+                                <option value="hard-light">ハードライト</option>
+                                <option value="soft-light">ソフトライト</option>
+                                <option value="difference">差解</option>
+                                <option value="exclusion">除外</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="panel-header" style="display: flex; justify-content: space-between; align-items: center;">
                     <h3>エフェクト調整</h3>
                     <div class="header-right" style="gap: 5px;">
@@ -122,6 +175,7 @@
         </div>
     </section>
 
+    <script src="js/layers.js"></script>
     <script src="js/effects.js"></script>
     <script src="js/dropzone.js"></script>
     <script src="js/ui.js"></script>

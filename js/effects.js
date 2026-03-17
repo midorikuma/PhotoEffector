@@ -7,60 +7,55 @@
 const PhotoEffects = (() => {
     'use strict';
 
-    /** オリジナル画像の ImageData を保持 */
-    let originalImageData = null;
     let canvas = null;
     let ctx = null;
-    let sourceImage = null;
 
     /**
-     * Canvas と画像を初期化
+     * Canvas の初期化 (最初の起動用)
      * @param {HTMLCanvasElement} canvasEl
-     * @param {HTMLImageElement} img
      */
-    function init(canvasEl, img) {
+    function init(canvasEl) {
         canvas = canvasEl;
         ctx = canvas.getContext('2d', { willReadFrequently: true });
-        sourceImage = img;
-
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-
-        ctx.drawImage(img, 0, 0);
-        originalImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     }
 
     /**
-     * エフェクトを適用して Canvas を更新
-     * @param {Object} params - エフェクトパラメータ
+     * 単一レイヤーにエフェクトを適用し、そのレイヤー専用のオフスクリーンCanvasを更新
+     * @param {Object} layer - LayerManagerのレイヤーオブジェクト
      */
-    function applyEffects(params) {
-        if (!originalImageData) return;
+    function applyEffectsToLayer(layer) {
+        if (!layer.image) return;
 
-        // 一時的な offscreen canvas で作業
-        const w = canvas.width;
-        const h = canvas.height;
+        const offCanvas = layer.offscreen;
+        const offCtx = offCanvas.getContext('2d', { willReadFrequently: true });
+        const params = layer.params;
+        const w = offCanvas.width;
+        const h = offCanvas.height;
 
-        // まず元画像を描画（blur用に CSS filter を使用するため）
-        ctx.clearRect(0, 0, w, h);
+        // クリア
+        offCtx.clearRect(0, 0, w, h);
 
-        // ぼかし処理は CSS filter で適用
+        // まず元画像を描画（ぼかし処理は CSS filter を使用）
         if (params.blur > 0) {
-            ctx.filter = `blur(${params.blur}px)`;
+            offCtx.filter = `blur(${params.blur}px)`;
         } else {
-            ctx.filter = 'none';
+            offCtx.filter = 'none';
         }
 
-        ctx.drawImage(sourceImage, 0, 0);
-        ctx.filter = 'none';
+        // 中央に描画 (サイズが異なる場合の簡易対応)
+        const dx = (w - layer.image.naturalWidth) / 2;
+        const dy = (h - layer.image.naturalHeight) / 2;
+        offCtx.drawImage(layer.image, dx, dy);
+        offCtx.filter = 'none';
 
         // ピクセルデータを取得
-        const imageData = ctx.getImageData(0, 0, w, h);
+        const imageData = offCtx.getImageData(0, 0, w, h);
         const data = imageData.data;
-        const origData = originalImageData.data;
 
-        // 各ピクセルにエフェクトを適用
+        // カスタムエフェクトの適用
         for (let i = 0; i < data.length; i += 4) {
+            // 完全透明ならスキップ（アルファ対応）
+            if (data[i + 3] === 0) continue;
             let r = data[i];
             let g = data[i + 1];
             let b = data[i + 2];
@@ -132,87 +127,116 @@ const PhotoEffects = (() => {
             data[i + 2] = Math.max(0, Math.min(255, b | 0));
         }
 
-        ctx.putImageData(imageData, 0, 0);
+        offCtx.putImageData(imageData, 0, 0);
 
-        // --- ピクセル化 (Pixelate) ---
+        // --- Post-processing Effects ---
         if (params.pixelate > 1) {
-            applyPixelate(params.pixelate);
+            _applyPixelate(offCanvas, offCtx, params.pixelate);
         }
-
-        // --- イラスト風 (Illustration / Cartoon) ---
         if (params.illustration > 0) {
-            applyIllustration(params.illustration);
+            _applyIllustration(offCanvas, offCtx, params.illustration);
         }
-
-        // --- シャープネス (Sharpness) ---
         if (params.sharpness > 0) {
-            applySharpness(params.sharpness);
+            _applySharpness(offCanvas, offCtx, params.sharpness);
         }
-
-        // --- ビネット (Vignette) ---
         if (params.vignette > 0) {
-            applyVignette(params.vignette);
+            _applyVignette(offCanvas, offCtx, params.vignette);
         }
+    }
+
+    /**
+     * 全レイヤーを指定のレイヤー順に合成し、メインキャンバスに描画
+     */
+    function compositeAllLayers(layers) {
+        if (!ctx) return;
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // メインキャンバスをクリア (透過維持)
+        ctx.clearRect(0, 0, w, h);
+
+        layers.forEach(layer => {
+            if (!layer.visible) return;
+
+            // 再計算が必要なら計算する
+            if (layer.needsUpdate) {
+                applyEffectsToLayer(layer);
+                layer.needsUpdate = false;
+            }
+
+            // 合成モードと不透明度を設定
+            ctx.globalAlpha = layer.opacity;
+            ctx.globalCompositeOperation = layer.blendMode;
+
+            // メインキャンバスに描画
+            ctx.drawImage(layer.offscreen, 0, 0);
+        });
+
+        // 状態をリセット
+        ctx.globalAlpha = 1.0;
+        ctx.globalCompositeOperation = 'source-over';
     }
 
     /**
      * アンシャープマスクによるシャープネス
      */
-    function applySharpness(amount) {
-        const w = canvas.width;
-        const h = canvas.height;
-        const imageData = ctx.getImageData(0, 0, w, h);
+    function _applySharpness(targetCanvas, targetCtx, amount) {
+        const w = targetCanvas.width;
+        const h = targetCanvas.height;
+        const imageData = targetCtx.getImageData(0, 0, w, h);
         const data = imageData.data;
 
-        // ぼかし版を一時 canvas で作成
         const tmpCanvas = document.createElement('canvas');
         tmpCanvas.width = w;
         tmpCanvas.height = h;
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.filter = 'blur(1px)';
-        tmpCtx.drawImage(canvas, 0, 0);
+        tmpCtx.drawImage(targetCanvas, 0, 0);
         tmpCtx.filter = 'none';
         const blurData = tmpCtx.getImageData(0, 0, w, h).data;
 
-        const strength = amount / 50; // 0~100 → 0~2
+        const strength = amount / 50;
 
         for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] === 0) continue; // 透明ピクセルスキップ
             data[i] = Math.max(0, Math.min(255, data[i] + (data[i] - blurData[i]) * strength | 0));
             data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + (data[i + 1] - blurData[i + 1]) * strength | 0));
             data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + (data[i + 2] - blurData[i + 2]) * strength | 0));
         }
 
-        ctx.putImageData(imageData, 0, 0);
+        targetCtx.putImageData(imageData, 0, 0);
     }
 
     /**
      * 放射状グラデーションによるビネット
      */
-    function applyVignette(amount) {
-        const w = canvas.width;
-        const h = canvas.height;
+    function _applyVignette(targetCanvas, targetCtx, amount) {
+        const w = targetCanvas.width;
+        const h = targetCanvas.height;
         const strength = amount / 100;
 
         const cx = w / 2;
         const cy = h / 2;
         const radius = Math.max(cx, cy) * 1.2;
 
-        const gradient = ctx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius);
+        const gradient = targetCtx.createRadialGradient(cx, cy, radius * 0.3, cx, cy, radius);
         gradient.addColorStop(0, `rgba(0, 0, 0, 0)`);
         gradient.addColorStop(0.7, `rgba(0, 0, 0, ${0.2 * strength})`);
         gradient.addColorStop(1, `rgba(0, 0, 0, ${0.7 * strength})`);
 
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, w, h);
+        targetCtx.fillStyle = gradient;
+        // globalCompositeOperationを `source-atop` にすることで不透明ピクセルにのみビネットを適用する
+        targetCtx.globalCompositeOperation = 'source-atop';
+        targetCtx.fillRect(0, 0, w, h);
+        targetCtx.globalCompositeOperation = 'source-over';
     }
 
     /**
      * ピクセル化エフェクト
-     * 画像を縮小→拡大してモザイクのような効果を生む
      */
-    function applyPixelate(blockSize) {
-        const w = canvas.width;
-        const h = canvas.height;
+    function _applyPixelate(targetCanvas, targetCtx, blockSize) {
+        const w = targetCanvas.width;
+        const h = targetCanvas.height;
         const size = Math.max(2, blockSize | 0);
 
         const tmpCanvas = document.createElement('canvas');
@@ -220,75 +244,66 @@ const PhotoEffects = (() => {
         tmpCanvas.height = h;
         const tmpCtx = tmpCanvas.getContext('2d');
 
-        // 現在の canvas を取得
-        tmpCtx.drawImage(canvas, 0, 0);
+        tmpCtx.drawImage(targetCanvas, 0, 0);
 
-        // 縮小してから拡大（nearest neighbor でピクセル化）
-        ctx.clearRect(0, 0, w, h);
-        ctx.imageSmoothingEnabled = false;
+        targetCtx.clearRect(0, 0, w, h);
+        targetCtx.imageSmoothingEnabled = false;
 
         const smallW = Math.max(1, Math.ceil(w / size));
         const smallH = Math.max(1, Math.ceil(h / size));
 
-        ctx.drawImage(tmpCanvas, 0, 0, w, h, 0, 0, smallW, smallH);
-        ctx.drawImage(canvas, 0, 0, smallW, smallH, 0, 0, w, h);
+        targetCtx.drawImage(tmpCanvas, 0, 0, w, h, 0, 0, smallW, smallH);
+        targetCtx.drawImage(targetCanvas, 0, 0, smallW, smallH, 0, 0, w, h);
 
-        ctx.imageSmoothingEnabled = true;
+        targetCtx.imageSmoothingEnabled = true;
     }
 
     /**
-     * イラスト風（カートゥーン）エフェクト
-     * Sobel エッジ検出で黒いアウトラインを重ねてイラスト感を出す
+     * イラスト風エフェクト
      */
-    function applyIllustration(amount) {
-        const w = canvas.width;
-        const h = canvas.height;
-        const strength = amount / 100; // 0~1
+    function _applyIllustration(targetCanvas, targetCtx, amount) {
+        const w = targetCanvas.width;
+        const h = targetCanvas.height;
+        const strength = amount / 100;
 
-        // 現在の画像データからエッジを検出
-        const srcData = ctx.getImageData(0, 0, w, h);
+        const srcData = targetCtx.getImageData(0, 0, w, h);
         const src = srcData.data;
-
-        // エッジ用の一時 ImageData
-        const edgeData = ctx.createImageData(w, h);
+        const edgeData = targetCtx.createImageData(w, h);
         const edge = edgeData.data;
 
-        // Sobel カーネル
         for (let y = 1; y < h - 1; y++) {
             for (let x = 1; x < w - 1; x++) {
                 const idx = (y * w + x) * 4;
+                if (src[idx + 3] === 0) continue; // 透明ならスキップ
 
-                // 周囲ピクセルのグレースケール値を取得
                 const getGray = (ox, oy) => {
                     const i = ((y + oy) * w + (x + ox)) * 4;
+                    // 透明部分はエッジとして処理しないように調整
+                    if (src[i + 3] === 0) return 255;
                     return 0.2126 * src[i] + 0.7152 * src[i + 1] + 0.0722 * src[i + 2];
                 };
 
-                // Sobel X & Y
                 const gx = -getGray(-1, -1) - 2 * getGray(-1, 0) - getGray(-1, 1)
                     + getGray(1, -1) + 2 * getGray(1, 0) + getGray(1, 1);
                 const gy = -getGray(-1, -1) - 2 * getGray(0, -1) - getGray(1, -1)
                     + getGray(-1, 1) + 2 * getGray(0, 1) + getGray(1, 1);
 
                 const magnitude = Math.sqrt(gx * gx + gy * gy);
-
-                // エッジの強度をアルファとして使用（閾値調整）
                 const edgeVal = Math.min(255, magnitude * 1.5);
-                edge[idx] = 0;   // R (黒)
-                edge[idx + 1] = 0;   // G
-                edge[idx + 2] = 0;   // B
-                edge[idx + 3] = edgeVal * strength | 0; // Alpha
+                edge[idx] = 0;
+                edge[idx + 1] = 0;
+                edge[idx + 2] = 0;
+                edge[idx + 3] = edgeVal * strength | 0;
             }
         }
 
-        // エッジを元画像に重ねる
         const tmpCanvas = document.createElement('canvas');
         tmpCanvas.width = w;
         tmpCanvas.height = h;
         const tmpCtx = tmpCanvas.getContext('2d');
         tmpCtx.putImageData(edgeData, 0, 0);
 
-        ctx.drawImage(tmpCanvas, 0, 0);
+        targetCtx.drawImage(tmpCanvas, 0, 0);
     }
 
     /**
@@ -312,7 +327,8 @@ const PhotoEffects = (() => {
 
     return {
         init,
-        applyEffects,
+        applyEffectsToLayer,
+        compositeAllLayers,
         toDataURL,
         toBlob
     };
